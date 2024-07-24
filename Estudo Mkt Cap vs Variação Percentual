@@ -1,0 +1,142 @@
+# Código bem feio... feito rapidamente no Python, só para testar teoria Market Cap vs Variação
+
+# Lembrando que Mkt cap deixei estável, mas dá pra fazer histórico:
+
+
+
+#
+# Obtendo a lista de componentes do S&P 500 do FRED
+sp500_tickers = pd.read_excel("/Users/guilhermerenatorosslerzanin/Antigo/Python/bases/sp500.xlsx")
+
+print(sp500_tickers)
+
+ticker_df = sp500_tickers[['ticker']].reset_index(drop=True)
+
+print(ticker_df)
+
+ticker_list = ticker_df['ticker'].tolist()
+
+# Obtendo as cotações históricas de todas as ações no sp500_tickers
+historical_data = yf.download(ticker_list, start="2022-01-01", end="2022-12-31")["Adj Close"]
+
+historical_data.head(5)
+historical_data.tail(5)
+
+historical_data.loc[:, "AAPL"]
+
+first_day = historical_data.iloc[0]
+last_day = historical_data.iloc[-1]
+annual_returns = (last_day - first_day)/first_day
+print(annual_returns)
+
+annual_returns["NVDA"]
+
+# Calculating annual returns
+#annual_returns = historical_data.pct_change().resample('Y').sum()
+#print(annual_returns)
+
+#returns_2023 = annual_returns.loc['2023-12-29']
+#print(returns_2023)
+
+#returns_2023_new = returns_2023.transpose()
+
+#variation_2023 = returns_2023_new.iloc[:, 0]
+
+#variation_2023.info()
+
+ret_2023 = pd.DataFrame(annual_returns)
+ret_2023.reset_index(inplace=True)
+
+ret_2023.columns = ['Ticker', 'var_2023']
+ativos_variacao_2023 = ret_2023
+
+
+
+
+
+tickers3 = ["^GSPC"]
+data3 = yf.download(tickers3, start="2021-01-01", end="2023-12-31")["Adj Close"]
+annual_returns3 = data3.pct_change().resample('Y').sum()
+returns_2023_sp500 = annual_returns3.loc['2022']
+print(returns_2023_sp500)
+
+returns_2023_new_sp500 = returns_2023_sp500.transpose()
+
+returns_2023_new_sp500.shape
+
+retorno_sp500 = pd.DataFrame({"Ticker": "S&P500", 
+                              "var_2023":returns_2023_new_sp500, 
+                              "Market Cap": 0000000000000})
+
+
+
+
+# Dicionário para armazenar a capitalização de mercado de cada ticker
+market_caps = {}
+
+market_caps_2023 = {}
+for ticker in ticker_df['ticker']:
+    try:
+        info = yf.Ticker(ticker).info
+        market_cap = info['marketCap']
+        market_caps_2023[ticker] = market_cap
+    except:
+        market_caps_2023[ticker] = None
+
+print(market_caps_2023)
+
+
+market_caps_2023_df = pd.DataFrame(market_caps_2023, index=[0]).transpose()
+market_caps_2023_df['Ticker'] = market_caps_2023_df.index
+market_caps_2023_df.reset_index(drop=True, inplace=True)
+market_caps_2023_df.rename(columns={0: 'Market Cap'}, inplace=True)
+market_caps_2023_df
+
+
+
+
+dataframe_2023 = pd.concat([ativos_variacao_2023.set_index('Ticker'), market_caps_2023_df.set_index('Ticker')], axis=1)
+
+
+dataframe_2023_df = pd.concat([dataframe_2023, retorno_sp500.set_index('Ticker')], axis=0)
+
+dataframe_2023_df['var_2023'] = dataframe_2023_df['var_2023'] * 100
+dataframe_2023_df['Market Cap'] = dataframe_2023_df['Market Cap'] / 1e9
+
+dataframe_2023_df['Ticker'] = dataframe_2023_df.index
+
+
+dataframe_2023_df['Market Cap'] = pd.to_numeric(dataframe_2023_df['Market Cap'], errors='coerce')
+dataframe_2023_df['var_2023'] = pd.to_numeric(dataframe_2023_df['var_2023'], errors='coerce')
+
+
+
+
+
+
+
+
+above_sp500 = len(dataframe_2023_df[dataframe_2023_df['var_2023'] > dataframe_2023_df.loc['S&P500', 'var_2023']])
+percent_above_sp500 = (above_sp500 / len(dataframe_2023_df)) * 100
+print(f"{percent_above_sp500:.2f}% of tickers had var_2023 above the S&P500.")
+
+label = f"  Apenas {percent_above_sp500:.2f}% dos ativos superaram o S&P500 "
+label2= f'Fonte: @Gui Zanin, CFA - Dados Yahoo Finance'
+
+plot = pn.ggplot(dataframe_2023_df, pn.aes(x='var_2023', y='Market Cap')) + \
+    pn.geom_point(color='blue', size=3) + \
+    pn.geom_text(pn.aes(label='Ticker'), size=8, va='bottom', ha='left', color='blue') + \
+    pn.geom_vline(xintercept=dataframe_2023_df.loc['S&P500', 'var_2023'], color='black', linetype='dashed') + \
+    pn.annotate('text', x = dataframe_2023_df.loc['S&P500', 'var_2023'], y = dataframe_2023_df['Market Cap'].quantile(0.9915), label = label, color='black', ha='left', va='top', size=9) + \
+    pn.theme_classic() + \
+    pn.xlab('Variação % dos Ativos') + \
+    pn.ylab('Market Cap - em Bilhões') + \
+    pn.ggtitle('Variação % dos Ativos vs. Market Cap em 2022') + \
+    pn.annotate('text', x = 300, y = 3500, label = label2, color='gray', ha='right', va='bottom', size=8)
+
+# Display the plot
+plot.show()
+
+# end
+#########################
+

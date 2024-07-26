@@ -139,8 +139,11 @@ cumulative_investment_data
 # Print the cumulative investment data
 print(cumulative_investment_data)
 
+# Converta para diário
+cumulative_investment_data_daily = cumulative_investment_data.resample('D').ffill()
+
 # Plot the investment values
-cumulative_investment_data.plot.line()
+cumulative_investment_data_daily.plot.line()
 plt.xlabel('Months')
 plt.ylabel('Investment Value')
 plt.title(f'Aporte de 100 reais Mensais desde {ano_inicio}')

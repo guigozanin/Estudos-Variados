@@ -19,14 +19,16 @@ import datetime
 warnings.filterwarnings("ignore")
 
 # Escolhendo o período
-inicio = "2020-01-01"
+inicio = "2022-01-01" # Lembrando que o IMAB só começou em 2019-05-20
 fim = datetime.date.today().strftime("%Y-%m-%d")
 
-# Lembrando que o IMAB só começou em 2019-05-20
+
 
 # Segregando ano
 ano_inicio = datetime.datetime.strptime(inicio, "%Y-%m-%d").year
+ano_inicio_float = float(ano_inicio)
 ano_fim = datetime.datetime.strptime(fim, "%Y-%m-%d").year
+ano_fim_float = float(ano_fim)
 
 # Código CDI no BC
 CDI = sgs.get({'CDI':4389})
@@ -86,9 +88,12 @@ ibov_returns = ibov_prices.pct_change().resample('M').sum()
 merged_data = pd.concat([imab_returns, ibov_returns, CDI_mensal], axis=1)
 merged_data.columns = ['IMAB11', 'BOVA11', 'CDI']
 merged_data = merged_data.dropna()
-merged_data.head()
-merged_data.tail()
+merged_data.head(3)
+merged_data.tail(3)
 
+# Acumulado para calcular o índice
+merged_data_acumulado =  np.cumprod((1 + merged_data)) -1
+merged_data_acumulado.tail()
 
 ######################################################
 
@@ -105,16 +110,12 @@ ibovespa_investment = [investment_amount]
 imab_investment = [investment_amount]
 cdi_investment = [investment_amount]
 
-# Calculate the investment values for each month
+# Calcular os valores de investimento para cada mês
 for i in range(1, num_months):
-    ibovespa_investment.append(ibovespa_investment[i-1] * (1 + merged_data['BOVA11'].iloc[i]))
-    imab_investment.append(imab_investment[i-1] * (1 + merged_data['IMAB11'].iloc[i]))
-    cdi_investment.append(cdi_investment[i-1] * (1 + merged_data['CDI'].iloc[i]))
+    ibovespa_investment.append((investment_amount * ((merged_data_acumulado['BOVA11'].iloc[i]))) + investment_amount)
+    imab_investment.append(investment_amount * ((merged_data_acumulado['IMAB11'].iloc[i])) + investment_amount)
+    cdi_investment.append(investment_amount * ((merged_data_acumulado['CDI'].iloc[i])) + investment_amount)
 
-#Invertendo os retornos - ganho de cada um dos aportes
-ibovespa_investment = ibovespa_investment[::-1]
-imab_investment = imab_investment[::-1]
-cdi_investment = cdi_investment[::-1]
 
 # Create a DataFrame to store the investment values
 investment_data = pd.DataFrame({

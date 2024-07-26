@@ -26,9 +26,7 @@ fim = datetime.date.today().strftime("%Y-%m-%d")
 
 # Segregando ano
 ano_inicio = datetime.datetime.strptime(inicio, "%Y-%m-%d").year
-ano_inicio_float = float(ano_inicio)
 ano_fim = datetime.datetime.strptime(fim, "%Y-%m-%d").year
-ano_fim_float = float(ano_fim)
 
 # Código CDI no BC
 CDI = sgs.get({'CDI':4389})

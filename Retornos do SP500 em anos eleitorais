@@ -1,0 +1,132 @@
+ %% [markdown]
+# # Retornos do SP500 Anuais
+
+# %%
+import yfinance as yf
+import pandas as pd
+import plotly.express as px
+
+# %%
+asset = yf.download("^GSPC", start = "1929-01-01")[["Adj Close"]]
+
+# %%
+df = asset.copy()
+df["ano"] = df.index.year
+df["dia_do_ano"] = df.index.dayofyear
+df
+
+# %%
+tabela = df.pivot(index="dia_do_ano", columns = "ano", values = "Adj Close")
+tabela_dt = pd.DataFrame(tabela)  # ou qualquer outra maneira de definir 'tabela'
+
+tab = tabela_dt.fillna(method="bfill")
+
+tab = (tab / tab.iloc[0]) -1
+
+tab.dropna()
+tab
+
+# %%
+anos = []
+for i in range(1932, 2025, 4):
+    anos.append(i)
+anos
+
+# %%
+fig = px.line(
+    tab[anos],
+    height = 800,
+    width = 1000,
+    template = "plotly_dark",
+    title = "Retornos do S&P500 em Anos Eleitorais",
+    labels = {
+        "value" : "retorno"
+    }
+)
+
+    # Set the line color for all years to gray
+fig.update_traces(line_color='gray')
+
+    # Set the line color for the year 2024 to a different color
+fig.update_traces(line_color='yellow', selector=dict(name='2024'))
+#fig.add_vline(x=str(50).day_of_week)
+
+fig.update_layout(annotations=[
+    dict(
+        text='Elaboração @Gui_Zanin - Base de dados: Yahoo Finance',
+        xref='paper',
+        yref='paper',
+        x=0,
+        y=-0.1,
+       showarrow=False,
+        font=dict(
+        size=13,
+        color='gray'
+        )
+    )
+])
+fig.show()
+
+# %% [markdown]
+# # IBOV  Todos os Anos
+
+# %%
+ibov = yf.download("^BVSP", start = "1929-01-01")[["Adj Close"]]
+ibov
+
+# %%
+df = ibov.copy()
+df["ano"] = df.index.year
+df["dia_do_ano"] = df.index.dayofyear
+df
+tabela = df.pivot(index="dia_do_ano", columns = "ano", values = "Adj Close")
+tabela_dt = pd.DataFrame(tabela)  # ou qualquer outra maneira de definir 'tabela'
+
+tab = tabela_dt.fillna(method="bfill")
+
+tab = (tab / tab.iloc[0]) -1
+
+tab.dropna()
+tab
+anos = []
+for i in range(1995, 2025, 1): # se nao estraga o gráfico
+    anos.append(i)
+anos
+
+# %%
+fig = px.line(
+    tab[anos],
+    height = 800,
+    width = 1000,
+    template = "plotly_dark",
+    title = "Retornos do IBOV todos os anos",
+    labels = {
+        "value" : "retorno"
+    }
+)
+
+    # Set the line color for all years to gray
+fig.update_traces(line_color='gray')
+
+    # Set the line color for the year 2024 to a different color
+fig.update_traces(line_color='yellow', selector=dict(name='2024'))
+#fig.add_vline(x=str(50).day_of_week)
+
+fig.update_layout(annotations=[
+    dict(
+        text='Elaboração @Gui_Zanin - Base de dados: Yahoo Finance',
+        xref='paper',
+        yref='paper',
+        x=0,
+        y=-0.1,
+       showarrow=False,
+        font=dict(
+        size=13,
+        color='gray'
+        )
+    )
+])
+fig.show()
+
+
+

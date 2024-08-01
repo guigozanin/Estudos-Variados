@@ -1,5 +1,5 @@
  %% [markdown]
-# # Retornos do SP500 Anuais
+# # Retornos do SP500 em anos eleitorais
 
 # %%
 import yfinance as yf

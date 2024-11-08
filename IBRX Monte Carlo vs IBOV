@@ -1,8 +1,6 @@
-
-
-
-
-
+############################################################################################################
+# Estudo Carteiras Randomicas IBRX vs Ibovespa
+############################################################################################################
 
 from datetime import datetime, timedelta
 import pandas as pd
@@ -13,8 +11,6 @@ import matplotlib.gridspec as gridspec
 from matplotlib.ticker import FuncFormatter
 
 import yfinance as yf
-
-
 
 
 ############
@@ -29,9 +25,6 @@ taxa_anual = 0.02 # adm
 
 
 ############
-
-
-
 
 
 
@@ -126,8 +119,6 @@ df_comp_indices = df_comp_indices[(df_comp_indices['ano'] >= ano_inicio) & (df_c
 
 
 
-
-
 # DataFrame final para armazenar todas as simulações
 df_carteira_final = pd.DataFrame()
 
@@ -213,7 +204,6 @@ plt.show()
 # Ativos Monte  Carlos e estatística
 
 
-
 # Formatter to convert y-axis values to percentages
 percent_formatter = FuncFormatter(lambda x, _: f'{x * 100:.0f}%')
 
@@ -266,7 +256,6 @@ plt.show()
 
 
 # Calculando estatatísticas
-
 
 # Calcular a porcentagem de simulações que ficaram acima do retorno do Ibovespa
 simulacoes_acima_ibov = (terminal_returns[terminal_returns.index.str.contains('simulacao')] > retorno_acumulado_ibov_terminal).sum()

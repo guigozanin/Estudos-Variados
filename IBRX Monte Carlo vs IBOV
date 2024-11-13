@@ -96,6 +96,7 @@ df_daily_melted = pd.melt(df_daily_returns.reset_index(), id_vars=['data'], var_
 df_daily_melted["quad"] = df_daily_melted["data"].apply(obter_quad)
 df_daily_melted["ano"] = df_daily_melted["data"].dt.year
 df_daily_melted["mes"] = df_daily_melted["data"].dt.month
+df_daily_returns_new = df_daily_returns.dropna(axis=0, how="all").fillna(0) + 1
 
 df_daily_melted = df_daily_melted.fillna(0)
 
@@ -112,51 +113,60 @@ df_comp_indices['ano'] = df_comp_indices['quad'].str[-4:]
 df_comp_indices['ano'] = df_comp_indices['ano'].astype(int)
 
 # Ordena o DataFrame pela coluna 'quad' em ordem crescente
-df_comp_indices = df_comp_indices.sort_values(by='ano').reset_index(drop=True)
+df_comp_indices = df_comp_indices.sort_values(by=['ano', 'quad'], ascending=True)
 # Filtra o DataFrame para incluir apenas os anos após 2019
-df_comp_indices = df_comp_indices[(df_comp_indices['ano'] >= ano_inicio) & (df_comp_indices['ano'] <= ano_fim)].reset_index(drop=True)
+df_comp_indices = df_comp_indices[(df_comp_indices['ano'] >= ano_inicio) & (df_comp_indices['ano'] <= ano_fim)]
 
 
+from joblib import Parallel, delayed
 
-
-# DataFrame final para armazenar todas as simulações
-df_carteira_final = pd.DataFrame()
-
-for i in range(num_simulacoes):
-    # Passo 6: Escolhendo 5 ativos aleatórios no índice, por trimestre
-    selected_tickers = []
+def run_simulation(i, df_comp_indices, df_momentum, df_daily_returns_new, num_ativos_cart):
+    df_carteira_quad = pd.DataFrame()
+    lista_pesos = [1]
     for quad in df_comp_indices['quad'].unique():
+        mes_anterior, ano_anterior = obter_mes_anterior(quad)
+        
+        mes = 1 if int(quad[0]) == 1 else 5 if int(quad[0]) == 2 else 9
+        selected_tickers = []
         tickers = df_comp_indices[df_comp_indices['quad'] == quad]['ticker'].tolist()
-        selected_tickers.extend(np.random.choice(tickers, size=5, replace=False)) # 5 ativos aleatórios
+        
+        # Seleciona ativos aleatórios
+        selected_tickers.extend(
+            np.random.choice(tickers, size=num_ativos_cart, replace=False)
+        )
 
-    selected_tickers_df = pd.DataFrame({
-        'quad': np.repeat(df_comp_indices['quad'].unique(), 5),
-        'ticker': selected_tickers
-    })
+        new_df = df_daily_returns_new.filter(selected_tickers).reset_index()
+        new_df["quad"] = new_df.data.apply(obter_quad)
+        new_df = new_df.query("quad == @quad")
 
-    # Passo 7: Pegando o histórico dos ativos filtrados
-    filtered_df = df_daily_melted.merge(selected_tickers_df, on=['quad', 'ticker'])
-    filtered_df = filtered_df.sort_values(by='data')
+        df_cum_rets = (
+            new_df
+            .drop(["quad"], axis=1)
+            .set_index("data")
+            .sort_index(ascending=True)
+            .cumprod()
+            .multiply(lista_pesos[-1])
+            .divide(int(len(selected_tickers)))
+            .assign(retorno_diario=lambda x: x.sum(axis=1))
+        )
 
-    # Passo 8: Calculando o retorno da carteira
-    df = filtered_df.copy()
-    df['num_tickers'] = df.groupby('data')['ticker'].transform('count')
-    df['peso'] = 1 / df['num_tickers']
-    df['retorno_ponderado'] = df['peso'] * df['variacao_fechamento']
-    
-    # Calcula o retorno diário da carteira para a simulação atual
-    df_carteira = df.groupby('data').agg(retorno_diario=('retorno_ponderado', 'sum')).reset_index()
-    
-    # Renomeia a coluna de retorno diário para incluir o número da simulação
-    df_carteira.rename(columns={'retorno_diario': f'retorno_diario_simulacao_{i+1}'}, inplace=True)
+        lista_pesos.append(df_cum_rets.iloc[-1]["retorno_diario"])
+        df_carteira_quad = pd.concat([df_carteira_quad, df_cum_rets[["retorno_diario"]]], axis=0)
 
-    # Junta os retornos diários desta simulação ao DataFrame final
-    if df_carteira_final.empty:
-        df_carteira_final = df_carteira
-    else:
-        df_carteira_final = df_carteira_final.merge(df_carteira, on='data', how='left')
+    # Renomeia coluna para incluir o número da simulação
+    df_carteira_quad.rename(columns={'retorno_diario': f'retorno_diario_simulacao_{i+1}'}, inplace=True)
+    return df_carteira_quad
 
-df_carteira_final
+# Define a wrapper function for joblib parallelization
+def run_simulation_parallel(i):
+    return run_simulation(i, df_comp_indices, df_momentum, df_daily_returns_new, num_ativos_cart)
+
+# Execute the simulations in parallel with joblib
+resultados = Parallel(n_jobs=-1)(delayed(run_simulation_parallel)(i) for i in range(num_simulacoes))
+
+# Combine results
+df_carteira_final = pd.concat(resultados, axis=1).sort_index(ascending=True)
+df_carteira_final = df_carteira_final.pct_change().dropna().reset_index()
 
 
 

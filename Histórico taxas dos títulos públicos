@@ -1,0 +1,87 @@
+
+# Pegando histórico taxas dos títulos públicos 
+# Fonte
+url = "https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/PrecoTaxaTesouroDireto.csv"
+
+# Baixando dos
+df = pd.read_csv(url, sep=';', encoding='latin1')
+
+# Filtrando os dados
+df_selected = df[df['Tipo Titulo'] == 'Tesouro IPCA+ com Juros Semestrais']
+df_filtered = df_selected[df_selected['Data Vencimento'] == '15/05/2055']
+df_filtered['Taxa Venda Manha'] = df_filtered['Taxa Venda Manha'].str.replace(',', '.').astype(float) / 100
+df_filtered['Data Base'] = pd.to_datetime(df_filtered['Data Base'], format='%d/%m/%Y')
+df_filtered.sort_values(by='Data Base', inplace=True)
+df_filtered
+
+# print the final return as text box
+ativo1 = round(df_filtered["Taxa Venda Manha"].iloc[-1], 3)  # finding the exact y-coordinate to the text box
+
+# Gráfico
+plt.figure(figsize=(8, 6))
+plt.plot(df_filtered['Data Base'], df_filtered['Taxa Venda Manha'], color='darkblue')
+plt.title('Tesouro Inflação 2055 - NTN-B com Cupom', fontsize=16)
+plt.xlabel('Data', fontsize=14)
+plt.ylabel('Taxa de Juros (%)', fontsize=14)
+plt.annotate(f'{round(ativo1*100,3)}%', xy=(df_filtered['Data Base'].iloc[-1], ativo1), xytext=(0, 15), textcoords='offset points', color='black',
+    bbox=dict(facecolor='#FDE725FF', alpha=0.5, edgecolor='none'))
+plt.figtext(0.28, 0.13, 'Elaboração @Gui_Zanin - Base de dados: Tesourotransparente')
+plt.gca().set_yticklabels(['{:.0f}%'.format(x * 100) for x in plt.gca().get_yticks()])
+plt.show()
+
+
+# Pegando outro título
+# Escolha o título 
+# df['Tipo Titulo'].unique()
+
+# Filtrando os dados
+df_selected = df[df['Tipo Titulo'] == 'Tesouro IPCA+']
+df_filtered = df_selected[df_selected['Data Vencimento'] == '15/05/2029']
+df_filtered['Taxa Venda Manha'] = df_filtered['Taxa Venda Manha'].str.replace(',', '.').astype(float) / 100
+df_filtered['Data Base'] = pd.to_datetime(df_filtered['Data Base'], format='%d/%m/%Y')
+df_filtered.sort_values(by='Data Base', inplace=True)
+df_filtered
+
+# print the final return as text box
+ativo1 = round(df_filtered["Taxa Venda Manha"].iloc[-1], 4)  # finding the exact y-coordinate to the text box
+
+# Gráfico
+plt.figure(figsize=(8, 6))
+plt.plot(df_filtered['Data Base'], df_filtered['Taxa Venda Manha'], color='darkgreen')
+plt.title('Tesouro Inflação 2029 - NTN-B', fontsize=16)
+plt.xlabel('Data', fontsize=14)
+plt.ylabel('Taxa de Juros (%)', fontsize=14)
+plt.annotate(f'{round(ativo1*100,4)}%', xy=(df_filtered['Data Base'].iloc[-1], ativo1), xytext=(0, 15), textcoords='offset points', color='black',
+    bbox=dict(facecolor='#FDE725FF', alpha=0.5, edgecolor='none'))
+plt.figtext(0.28, 0.13, 'Elaboração @Gui_Zanin - Base de dados: Tesourotransparente')
+plt.gca().set_yticklabels(['{:.0f}%'.format(x * 100) for x in plt.gca().get_yticks()]
+plt.show()
+
+# Pegando outro título
+# Escolha o título 
+# df['Tipo Titulo'].unique()
+
+# Filtrando os dados
+df_selected = df[df['Tipo Titulo'] == 'Tesouro Prefixado com Juros Semestrais']
+df_filtered = df_selected[df_selected['Data Vencimento'] == '01/01/2031']
+df_filtered['Taxa Venda Manha'] = df_filtered['Taxa Venda Manha'].str.replace(',', '.').astype(float) / 100
+df_filtered['Data Base'] = pd.to_datetime(df_filtered['Data Base'], format='%d/%m/%Y')
+df_filtered.sort_values(by='Data Base', inplace=True)
+df_filtered
+
+# print the final return as text box
+ativo1 = round(df_filtered["Taxa Venda Manha"].iloc[-1], 3)  # finding the exact y-coordinate to the text box
+
+# Gráfico
+plt.figure(figsize=(8, 6))
+plt.plot(df_filtered['Data Base'], df_filtered['Taxa Venda Manha'], color='purple')
+plt.title('Tesouro Prefixado 2031 - NTN-F', fontsize=16)
+plt.xlabel('Data', fontsize=14)
+plt.ylabel('Taxa de Juros (%)', fontsize=14)
+plt.figtext(0.28, 0.13, 'Elaboração @Gui_Zanin - Base de dados: Yahoo Finance')
+plt.annotate(f'{round(ativo1*100,3)}%', xy=(df_filtered['Data Base'].iloc[-1], ativo1), xytext=(0, 15), textcoords='offset points', color='black',
+    bbox=dict(facecolor='#FDE725FF', alpha=0.5, edgecolor='none'))
+plt.figtext(0.00, -0.01, 'Elaboração @Gui_Zanin - Base de dados: Tesourotransparente')
+plt.gca().set_yticklabels(['{:.0f}%'.format(x * 100) for x in plt.gca().get_yticks()])
+plt.show()
+

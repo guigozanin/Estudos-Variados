@@ -1,0 +1,629 @@
+# Históricos Juros BR
+
+
+
+
+###############
+############### Curva de Juros Brasil ###############
+###############
+
+
+
+from matplotlib import pyplot as plt
+import pandas as pd
+import numpy as np
+from bcb import sgs
+import requests
+import yfinance as yf
+import re
+import datetime
+import lxml.html
+from bizdays import Calendar
+from pandas_datareader.data import DataReader
+from datetime import date
+import matplotlib.ticker as mticker
+import QuantLib as ql
+from scipy.interpolate import interp1d
+import seaborn as sns
+import pandas_datareader.data as web 
+from plotnine import ggplot, aes, geom_line, facet_wrap
+
+
+
+#################################################################
+
+
+
+
+
+def _discount_curve_builder(_curve, dib):
+    def _(t):
+        t = np.array(t)
+        r = _curve(t)
+        f = (1 + r) ** (t/dib)
+        return 1/f
+    return _
+
+
+def ff_discount_curve(terms, rates, dib=252):
+    _curve = ff_curve(terms, rates, dib)
+    return _discount_curve_builder(_curve, dib)
+
+
+def nss_discount_curve(par, dib=252):
+    _curve = nss_curve(par, dib)
+    return _discount_curve_builder(_curve, dib)
+
+
+def ff_curve(terms, rates, dib=252):
+    log_pu = np.log((1 + rates)**(terms/dib))
+    def _(t):
+        t = np.array(t)
+        pu = np.exp(np.interp(t, terms, log_pu))
+        return pu ** (252 / t) - 1
+    return _
+
+
+def nss(t, b1, b2, b3, b4, l1, l2):
+    v = b1 + \
+        b2 * (1 - np.exp(-l1*t)) / (l1*t) + \
+        b3 * ((1 - np.exp(-l1*t)) / (l1*t) - np.exp(-l1*t)) + \
+        b4 * ((1 - np.exp(-l2*t)) / (l2*t) - np.exp(-l2*t))
+    return v
+
+
+def nss_curve(par, dib=252):
+    ts = lambda t: nss(t, par[0], par[1], par[2], par[3], par[4], par[5])
+    def _(t):
+        t = t/dib
+        r = ts(t)
+        return r
+    return _
+
+
+def bizdayse(cal, refdate, dc):
+    return cal.bizdays(refdate, refdate + datetime.timedelta(dc))
+
+
+def to_numeric(elm):
+    s = elm.text
+    s = s.strip()
+    s = s.replace(',', '.')
+    return float(s)
+
+
+def get_curve(refdate, ticker, cal):
+    # refdate = '2020-12-14'
+    # ticker = 'PRE'
+    url = "http://www2.bmf.com.br/pages/portal/bmfbovespa/lumis/lum-taxas-referenciais-bmf-ptBR.asp"
+    url = f"{url}?Data={format(refdate, '%d/%m/%Y')}&Data1={format(refdate, '%Y%m%d')}&slcTaxa={ticker}"
+    doc = lxml.html.parse(url).getroot()
+
+    xs = doc.xpath("//table[contains(@id, 'tb_principal1')]")
+    x = [to_numeric(elm) for elm in xs[0].findall('td')]
+    dc = x[::3]
+    tx_252 = x[1::3]
+
+    terms = np.array([bizdayse(cal, refdate, d) for d in dc])
+    rates = np.array([r/100 for r in x[1::3]])
+
+    log_pu = np.log((1 + rates)**(terms/252))
+
+    def interp_ff(term):
+        term = np.array(term)
+        pu = np.exp(np.interp(term, terms, log_pu))
+        return (pu ** (252 / term) - 1) * 100
+
+    return interp_ff
+
+
+def get_contracts(refdate):
+    def _cleanup(x):
+        if x is None:
+            return ''
+        x = x.strip()\
+             .replace('.', '')\
+             .replace(',', '.')
+        return x
+    url = 'https://www2.bmf.com.br/pages/portal/bmfbovespa/lumis/lum-ajustes-do-pregao-ptBR.asp'
+    res = requests.post(url, data=dict(dData1=refdate.strftime('%d/%m/%Y')), verify=False)
+    root = lxml.html.fromstring(res.text)
+
+    rx = re.compile(r'Atualizado em: (\d\d/\d\d/\d\d\d\d)')
+    mx = rx.search(res.text)
+    if mx is None:
+        return None
+    
+    refdate = datetime.datetime.strptime(mx.group(1), '%d/%m/%Y')
+    table = root.xpath("//table[contains(@id, 'tblDadosAjustes')]")
+    if len(table) == 0:
+        return None
+    data = [_cleanup(td.text) for td in table[0].xpath('//td')]
+    df = pd.DataFrame({
+        'DataRef': refdate,
+        'Mercadoria': flatten_names(recycle(data, 0, 6)),
+        'CDVencimento': recycle(data, 1, 6),
+        'PUAnterior': recycle(data, 2, 6),
+        'PUAtual': recycle(data, 3, 6),
+        'Variacao': recycle(data, 4, 6)
+    })
+    df['Vencimento'] = df['CDVencimento'].map(contract_to_maturity)
+    df['PUAnterior'] = df['PUAnterior'].astype('float64')
+    df['PUAtual'] = df['PUAtual'].astype('float64')
+    df['Variacao'] = df['Variacao'].astype('float64')
+    return df
+   
+def flatten_names(nx):
+    for ix in range(len(nx)):
+        if (nx[ix] != ""):
+            last_name = nx[ix]
+        nx[ix] = last_name
+    x = [x[:3] for x in nx]
+    return x
+
+
+def recycle(s, i, m):
+    assert len(s) % m == 0
+    assert i < m
+    assert i >= 0
+    l = len(s)
+    idx = list(range(i, l, m))
+    return [s[i] for i in idx]
+
+
+def contract_to_maturity(x):
+    maturity_code = x[-3:]
+
+    year = int(maturity_code[-2:]) + 2000
+
+    m_ = dict(F = 1, G = 2, H = 3, J = 4, K = 5, M = 6,
+              N = 7, Q = 8, U = 9, V = 10, X = 11, Z = 12)
+    month_code = maturity_code[0]
+    month = int(m_[month_code])
+
+    return datetime.datetime(year, month, 1)
+
+
+def build_curve(code, df, **kwargs):
+    if code == 'DI1':
+        fut = build_di1_futures(df, **kwargs)
+        ts = build_di1_termstructure(fut, **kwargs)
+    elif code == 'DAP':
+        fut = build_dap_futures(df, **kwargs)
+        ts = build_dap_termstructure(fut, **kwargs)
+    elif code == 'IND':
+        fut = build_ind_futures(df, **kwargs)
+        ts = build_ind_termstructure(fut, **kwargs)
+    return build_ffinterp_curve(ts, kwargs['cal'])
+
+
+def build_ind_futures(df, **kwargs):
+    cal = kwargs['cal']
+    refdate = kwargs['refdate']
+    spot = kwargs['spot']
+
+    ctr = df[(df['Mercadoria'] == 'IND') &
+             (df['DataRef'] ==  refdate)].reset_index(drop=True)
+    
+    ctr['Dia15'] = ctr['Vencimento'].map(lambda dt: dt.replace(day=15))
+    ctr['Mes'] = ctr['Vencimento'].dt.month
+    ctr['Ano'] = ctr['Vencimento'].dt.year
+    
+    ctr['WedBefore'] = ctr.apply(lambda df: cal.getdate('first wed before 15th day', df['Ano'], df['Mes']), axis=1)
+    ctr['WedAfter'] = ctr.apply(lambda df: cal.getdate('first wed after 15th day', df['Ano'], df['Mes']), axis=1)
+    
+    ctr['DifBefore'] = (ctr['Dia15'] - pd.to_datetime(ctr['WedBefore'])).dt.days
+    ctr['DifAfter'] = (pd.to_datetime(ctr['WedAfter']) - ctr['Dia15']).dt.days
+    
+    is_wed = ctr['Dia15'].dt.weekday == 2
+    is_before = ctr['DifBefore'] < ctr['DifAfter']
+    is_after = ~is_before
+
+    ctr.loc[is_before, 'Maturity'] = ctr.loc[is_before, 'WedBefore']
+    ctr.loc[is_after, 'Maturity'] = ctr.loc[is_after, 'WedAfter']
+    ctr.loc[is_wed, 'Maturity'] = ctr.loc[is_wed, 'Dia15']
+    ctr['Maturity'] = ctr['Maturity'].map(cal.following)
+
+    ctr['DU'] = list(cal.vec.bizdays(ctr['DataRef'], ctr['Maturity']))
+    ctr['DC'] = (ctr['Maturity'] - ctr['DataRef']).dt.days
+    ctr = ctr[ctr['DU'] > 0].reset_index(drop=True)
+    
+    ctr = ctr.rename(columns={'PUAtual': 'PU'})
+    crv = ctr[['DataRef', 'Maturity', 'DU', 'DC', 'PU']].copy()
+
+    if spot is None:
+        return crv
+    
+    first_term = pd.DataFrame({
+        'DataRef': refdate,
+        'Maturity': [cal.offset(refdate, 1)],
+        'DU': [1],
+        'DC': [(cal.offset(refdate, 1) - refdate.date()).days],
+        'PU': [spot]
+    })
+    
+    df = pd.concat([first_term, crv], axis=0).reset_index(drop=True)
+    df['DataRef'] = pd.to_datetime(df['DataRef'])
+    df['Maturity'] = pd.to_datetime(df['Maturity'])
+    
+    return df
+
+
+def build_ind_termstructure(fut, **kwargs):
+    rf_curve = kwargs['rf_curve']
+    spot = kwargs['spot']
+    
+    riskfree = rf_curve(fut['DU'])
+    f_riskfree = (1 + riskfree['Rate']) ** (riskfree['DU']/252)
+    
+    fut['Rate'] = (f_riskfree * spot/fut['PU']) ** (252/fut['DU']) - 1
+    return fut[['DataRef', 'Maturity', 'DU', 'Rate']].copy()
+
+
+def build_dap_futures(df, **kwargs):
+    cal = kwargs['cal']
+    refdate = kwargs['refdate']
+    
+    ctr = df[(df['Mercadoria'] == 'DAP') &
+             (df['DataRef'] == refdate)].reset_index(drop=True)
+    
+    ctr['Vencimento'] = ctr['Vencimento'].map(lambda dt: dt.replace(day=15))
+    ctr['Maturity'] = ctr['Vencimento'].map(cal.following)
+    ctr['DU'] = list(cal.vec.bizdays(ctr['DataRef'], ctr['Maturity']))
+    ctr = ctr[ctr['DU'] > 0].reset_index(drop=True)
+    
+    ctr = ctr.rename(columns={'PUAtual': 'PU'})
+    
+    return ctr[['DataRef', 'Maturity', 'DU', 'PU']].copy()
+
+
+def build_dap_termstructure(fut, **kwargs):
+    notional = kwargs['notional']
+    
+    fut['Rate'] = (notional / fut['PU']) ** (252/fut['DU']) - 1
+    return fut[['DataRef', 'Maturity', 'DU', 'Rate']].copy()
+
+
+def build_di1_futures(df, **kwargs):
+    refdate = kwargs['refdate']
+    cal = kwargs['cal']
+    
+    ctr = df[(df['Mercadoria'] == 'DI1') &
+             (df['DataRef'] == refdate)].reset_index(drop=True)
+    ctr['Maturity'] = list(cal.vec.adjust_next(ctr['Vencimento']))
+    ctr['DU'] = list(cal.vec.bizdays(ctr['DataRef'], ctr['Maturity']))
+    ctr['DC'] = (ctr['Maturity'] - ctr['DataRef']).dt.days
+    ctr = ctr[ctr['DU'] > 0]
+    
+    ctr = ctr.rename(columns={'PUAtual': 'PU'})
+    return ctr[['DataRef', 'Maturity', 'DU', 'DC', 'PU']]
+
+
+def build_di1_termstructure(fut, **kwargs):
+    refdate = kwargs['refdate']
+    cal = kwargs['cal']
+    notional = kwargs['notional']
+    
+    fut['Rate'] = (notional / fut['PU'])**(252 / fut['DU']) - 1
+    fut_curve = fut[['DataRef', 'Maturity', 'DU', 'Rate']]
+    
+    cdi = sgs.get(('CDI', 4389), start_date=refdate, end_date=refdate)
+    first_term = pd.DataFrame({
+        'DataRef': refdate,
+        'Maturity': [cal.offset(refdate, 1)],
+        'DU': [1],
+        'Rate': [cdi.iloc[0, 0]/100]
+    })
+    
+    df = pd.concat([first_term, fut_curve], axis=0).reset_index(drop=True)
+    df['DataRef'] = pd.to_datetime(df['DataRef'])
+    df['Maturity'] = pd.to_datetime(df['Maturity'])
+    
+    return df
+
+
+
+def build_loglininterp_curve(ts, cal):
+    refdate = ts['DataRef'].iloc[0]
+    log_pu = np.log(ts['PU'])
+    terms = ts['DU']
+    def _curve(i_terms=None):
+        if i_terms is None:
+            return ts
+        i_terms = np.array(i_terms)
+        pu = np.exp(np.interp(i_terms, terms, log_pu))
+        return pd.DataFrame({
+            'DataRef': refdate,
+            'DU': i_terms,
+            'Maturity': cal.vec.offset(refdate, i_terms),
+            'PU': pu
+        })
+    return _curve
+
+
+def build_ffinterp_curve(ts, cal):
+    refdate = ts['DataRef'].iloc[0]
+    log_pu = np.log((1 + ts['Rate'])**(ts['DU']/252))
+    terms = ts['DU']
+    def _curve(i_terms=None):
+        if i_terms is None:
+            return ts
+        i_terms = np.array(i_terms)
+        pu = np.exp(np.interp(i_terms, terms, log_pu))
+        return pd.DataFrame({
+            'DataRef': refdate,
+            'DU': i_terms,
+            'Maturity': cal.vec.offset(refdate, i_terms),
+            'Rate': pu ** (252 / i_terms) - 1
+        })
+    return _curve
+
+
+def bizdiff(dates, cal):
+    return [cal.bizdays(d1, d2) for d1, d2 in zip(dates[:-1], dates[1:])]
+
+
+
+
+
+##########################################
+###### Get Multiples curves
+##########################################
+
+
+MARKET_CALENDAR = Calendar.load('ANBIMA')
+MARKET_CALENDAR
+
+refdate = MARKET_CALENDAR.seq('2020-01-02',  # old
+                        datetime.datetime.today() - datetime.timedelta(days=1)) # last date
+refdate
+
+
+# Inicializa uma lista para armazenar os DataFrames
+lista = []
+
+# Itera sobre cada data em 'refdate'
+for date in refdate:
+    try:
+        # Aplica o 'get_contracts' para cada data
+        curve = get_contracts(date)
+        
+        # Adiciona o resultado à lista, se válido
+        if curve is not None:
+            # Adiciona uma coluna de data ao DataFrame
+            curve['date'] = date
+            lista.append(curve)
+        else:
+            print(f"Nenhuma curva encontrada para a data {date}")
+    
+    except Exception as e:
+         # Caso ocorra um erro, imprime a data e o erro
+        print(f"Erro ao processar a data {date}: {e}")
+
+ # Cria um DataFrame concatenando todas as curvas na lista
+df_final = pd.concat(lista, ignore_index=True)
+
+# Imprime os resultados finais
+print(df_final)
+
+
+
+
+# Selecionando só DI
+di1 = df_final[(df_final['Mercadoria'] == 'DI1') & (df_final['PUAtual'] != 100000.0)].copy()
+di1 = di1.reset_index(drop=True, inplace=False)
+di1
+
+
+# 
+di1_2 = di1.copy()
+
+# Arrumando os dados
+
+di1['Maturity'] = di1['Vencimento'].map(MARKET_CALENDAR.following)
+di1['DU'] = di1.apply(lambda x: MARKET_CALENDAR.bizdays(x['DataRef'], x['Maturity']), axis=1)
+di1['Rate'] = (100000 / di1['PUAtual'])**(252 / di1['DU']) - 1
+di1_curve = di1[['DataRef', 'Maturity', 'DU', 'Rate', 'PUAtual']]
+di1_curve.columns = ['DataRef', 'Maturity', 'DU', 'Rate', 'PU']
+
+#Testes 2
+dc = di1_curve.copy()
+dc.columns = ['refdate', 'forward_date', 'biz_days', 'r_252', 'PU']
+di1_2 = di1_curve.copy()
+
+print(di1_curve)
+print(dc)
+
+
+####################################################################################
+
+# Gráfico xCurvas
+di1_curve.plot(x='Maturity', y='Rate', figsize=(20,6), style='-o',
+               ylabel='Rate', xlabel='Date', title='DI1 Curves');
+
+
+# Apenas uma curva de juros especifica
+di1_curve_1day = di1_curve.loc[di1_curve["DataRef"] == "2024-01-02"]
+# Gráfico
+ax = di1_curve_1day.plot.scatter(x="DU", y="Rate", figsize=(12, 6)) # DU ou Maturity
+ax.set_xlabel("Dias Úteis")
+ax.set_ylabel("Taxa (%)")
+ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0, decimals=1));
+
+
+
+
+
+
+####################################################################################
+###### Interpolaçao de 1 curva
+####################################################################################
+
+
+today = ql.Date().from_date(datetime.datetime(2024, 1, 2))
+ql.Settings.instance().evaluationDate = today
+print(ql.Settings.instance().evaluationDate)
+
+
+calendar = ql.Brazil(ql.Brazil.Settlement)
+data = [
+    (calendar.advance(today, d, ql.Days, ql.Following), (1 + r) ** (-d/252))
+    for d, r in zip(di1_curve_1day["DU"], di1_curve_1day["Rate"])
+]
+data.insert(0, (today, 1))
+dates, dfs = zip(*data)
+dayCounter = ql.Business252(calendar)
+curve0 = ql.DiscountCurve(dates, dfs, dayCounter)
+
+
+curve0.nodes()[:5]
+
+
+biz_days = calendar.businessDaysBetween(today, ql.Date(1,9,2024))
+print(curve0.discount(biz_days/252))
+print(curve0.discount(ql.Date(1,9,2024)))
+
+
+fwd_date = ql.Date().from_date(datetime.datetime(2025, 7, 12))
+biz_days = calendar.businessDaysBetween(today, fwd_date)
+print(curve0.discount(biz_days/252))
+print(curve0.discount(fwd_date))
+
+print(curve0.zeroRate(biz_days/252, ql.Compounded))
+
+
+
+# Grafico Interpolacao Linear
+i_curve = pd.DataFrame({
+    "days": list(range(1, di1_curve_1day["DU"].max())),
+    "rates": [curve0.zeroRate(i/252, ql.Compounded).rate()
+              for i in range(1, di1_curve_1day["DU"].max())],
+})
+
+ax = di1_curve_1day.plot.scatter(x="DU", y="Rate", figsize=(12, 6),
+                        label="Curva de Prefixada")
+i_curve.plot(x="days", y="rates", c="red", alpha=0.5, ax=ax, label="Interpolação")
+ax.set_xlabel("Dias Úteis")
+ax.set_ylabel("Taxa (%)")
+ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0, decimals=1));
+
+
+# Grafico Interpolacao Flatfoward
+f_curve = pd.DataFrame({
+    "days": list(range(1, di1_curve_1day["DU"].max())),
+    "rates": [curve0.forwardRate(i/252, (i+1)/252, ql.Compounded).rate()
+              for i in list(range(1, di1_curve_1day["DU"].max()))],
+})
+
+ax = di1_curve_1day.plot.scatter(x="DU", y="Rate", figsize=(12, 6),
+                        label="Curva de Prefixada")
+i_curve.plot(x="days", y="rates", c="red", alpha=0.5, ax=ax, label="Interpolação")
+f_curve.plot(x="days", y="rates", c="green", alpha=0.75, ax=ax, label="Forward 1D")
+ax.set_xlabel("Dias Úteis")
+ax.set_ylabel("Taxa (%)")
+ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0, decimals=1));
+
+
+
+
+########################################################################################################################################################
+########################################################################################################################################################
+
+# Variação da Curva de juros LP
+
+########################################################################################################################################################
+########################################################################################################################################################
+
+
+# Multiplos gráficos
+
+di1_2
+df_di1_futures = di1_2.copy()
+df_di1_futures.columns = ["dataref", "maturity", "business_days", "adjusted_tax", "PU"]
+
+df_di1_futures['year'] = df_di1_futures['dataref'].dt.year
+df_di1_futures = df_di1_futures[df_di1_futures['dataref'].dt.year > 2008]
+
+
+from plotnine import ggplot, aes, geom_line, facet_wrap, theme_classic, labs, scale_y_continuous
+from mizani.formatters import percent_format
+
+(
+    ggplot(df_di1_futures, aes(x='business_days', y='adjusted_tax', group='dataref'))
+    + geom_line(alpha=0.2)
+    + facet_wrap('~year')
+    + theme_classic()
+    + labs(x="Dias Úteis", y="Taxas",
+           title="16 anos das Curvas de Juros no Brasil",
+           subtitle="Curvas construídas a partir dos preços de ajuste dos contratos Futuros DI1",
+           caption=u"Fonte: B3 - Elaboração Guilherme Zanin, baseado no conteúdo do Wilson Freitas")
+    + scale_y_continuous(labels=percent_format())
+)
+
+
+
+
+
+# Gráfico animado
+
+
+
+import matplotlib.pyplot as plt
+import pandas as pd
+import matplotlib.animation as animation
+
+
+# Supondo que a base já está carregada no DataFrame df_di1_futures
+df_di1_futures['dataref'] = pd.to_datetime(df_di1_futures['dataref'])
+
+# Criar a figura e o eixo
+fig, ax = plt.subplots()
+plt.style.use("fast")
+#plt.figtext(0.01, -0.01, 'Elaboração @Gui_Zanin - Base de dados: Yahoo Finance')
+#plt.tight_layout()
+
+ax.set_xlabel('Dias Úteis')
+ax.set_ylabel('Taxas')
+
+
+# Configurar limites dos eixos
+ax.set_xlim(df_di1_futures['business_days'].min(), df_di1_futures['business_days'].max())
+ax.set_ylim(df_di1_futures['adjusted_tax'].min(), df_di1_futures['adjusted_tax'].max())
+
+# Função de animação
+def animate(i):
+    ax.clear()
+    ax.set_xlim(df_di1_futures['business_days'].min(), df_di1_futures['business_days'].max())
+    ax.set_ylim(df_di1_futures['adjusted_tax'].min(), df_di1_futures['adjusted_tax'].max())
+    ax.set_xlabel('Dias Úteis')
+    ax.set_ylabel('Taxas')
+    ax.set_title(f'Variação da Curva de Juros - Dataref: {df_di1_futures["dataref"].unique()[i].date()}')
+    ax.set_yticks(ax.get_yticks())
+    ax.set_yticklabels(['{:.0f}%'.format(x * 100) for x in ax.get_yticks()])
+    ax.text(0.05, 0.05, 'Elaboração: Guilherme Zanin, CFA - Base de dados: B3', transform=ax.transAxes)
+    #ax.set_facecolor('none')
+
+    # Filtrar dados até o ponto atual da animação
+    data = df_di1_futures[df_di1_futures['dataref'] == df_di1_futures['dataref'].unique()[i]]
+    
+    # Plotar os dados com tema ggplot
+
+    ax.plot(data['business_days'], data['adjusted_tax'], color='blue')
+
+
+# Criar a animação
+ani = animation.FuncAnimation(fig, animate, frames=len(df_di1_futures['dataref'].unique()), interval=30)
+
+# Salvar o vídeo como um arquivo mp4
+#ani.save('curva_juros_animada.mp4')
+
+
+ani.save('curva_juros_animada.gif')
+# https://ezgif.com/ conversor para mp4, mudar velocidade etc...
+
+plt.show()
+
+
+
+
+

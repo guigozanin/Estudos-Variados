@@ -1,0 +1,609 @@
+b
+##########################################################################################
+##########################################################################################
+##########################################################################################
+
+# Kelly Criterion
+# https://www.pyquantnews.com/the-pyquant-newsletter/risk-ruin-scariest-enemy-not-just-volatility
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+def simulate_trade(win_prob, avg_win, avg_loss):
+    """
+    Simulate a single trade with given win probability and average win/loss amounts.
+    """
+    if np.random.rand() < win_prob:
+        return avg_win
+    else:
+        return -avg_loss
+    
+
+def simulate_trading_strategy(initial_capital, trades, win_prob, avg_win, avg_loss):
+    """
+    Simulate the entire trading strategy over a given number of trades.
+    """
+    capital = initial_capital
+    capital_history = [capital]
+
+    for _ in range(trades):
+        capital += simulate_trade(win_prob, avg_win, avg_loss)
+        capital_history.append(capital)
+
+    return capital_history
+
+
+
+def calculate_risk_of_ruin(initial_capital, trades, win_prob, avg_win, avg_loss, simulations=100):
+    """
+    Calculate the risk of ruin over a number of trading simulations.
+    """
+    ruin_count = 0
+
+    for _ in range(simulations):
+        capital_history = simulate_trading_strategy(initial_capital, trades, win_prob, avg_win, avg_loss)
+        if min(capital_history) <= 0:
+            ruin_count += 1
+
+    return ruin_count / simulations
+
+
+
+initial_capital = 10000
+average_win = 1500
+average_loss = 1000
+trades = 1000
+
+
+risk_of_ruins = []
+steps = range(30, 60)
+for step in steps:
+    win_probability = step / 100
+    risk_of_ruin = calculate_risk_of_ruin(initial_capital, trades, win_probability, average_win, average_loss)
+    risk_of_ruins.append(risk_of_ruin)
+
+
+    # Plot the capital history
+plt.figure(figsize=(10, 6))
+plt.plot(steps, risk_of_ruins, label='Risk of ruin')
+plt.xlabel('Probability of a winning trade')
+plt.ylabel('Risk of ruin')
+plt.grid(True)
+plt.show()
+
+
+
+##########################################################################################
+##########################################################################################
+##########################################################################################
+
+# Kelly Criterion
+# https://www.pyquantnews.com/the-pyquant-newsletter/use-kelly-criterion-optimal-position-sizing
+
+import numpy as np
+from scipy.optimize import minimize_scalar
+from scipy.integrate import quad
+from scipy.stats import norm
+import yfinance as yf
+
+# Fetch annual returns for the S&P 500 index since 1950
+annual_returns = yf.download("AAPL")[["Adj Close"]]
+annual_returns.columns = ["AAPL"]                      
+annual_returns = annual_returns.resample("A").last().pct_change().dropna()
+
+# Compute rolling mean and standard deviation over a 25-year window
+return_params = annual_returns["AAPL"].rolling(25).agg(["mean", "std"]).dropna()
+
+# Define a function to calculate the negative value of the expected log return
+def norm_integral(f, mean, std):
+    """Calculates the negative expected log return
+    
+    Parameters
+    ----------
+    f : float
+        Leverage factor
+    mean : float
+        Mean return
+    std : float
+        Standard deviation of returns
+    
+    Returns
+    -------
+    float
+        Negative expected log return
+    """
+    
+    val, er = quad(
+        lambda s: np.log(1 + f * s) * norm.pdf(s, mean, std),
+        mean - 3 * std,
+        mean + 3 * std,
+    )
+    return -val
+
+
+# \Define a function to optimize the Kelly fraction using the minimize_scalar method
+def get_kelly(data):
+    """Optimizes the Kelly fraction
+    
+    Parameters
+    ----------
+    data : pd.Series
+        Contains mean and standard deviation of returns
+    
+    Returns
+    -------
+    float
+        Optimal Kelly fraction
+    """
+    
+    solution = minimize_scalar(
+        norm_integral, args=(data["mean"], data["std"]), bounds=[0, 2], method="bounded"
+    )
+    return solution.x
+
+# SciPyâs minimize_scalar function finds the value that minimizes the negative integral. 
+# You bound it between 0 and 2 so your smallest bet is 0 and your maximum bet is 2x. 
+# This means itâs best to use leverage and buy the S&P500 index on margin.
+
+
+
+# Calculate the Kelly fraction for each rolling window and add it to the annual 
+annual_returns['f'] = return_params.apply(get_kelly, axis=1)
+
+
+(
+    annual_returns[["AAPL"]]
+    .assign(kelly=annual_returns["AAPL"].mul(annual_returns.f.shift()))
+    .dropna()
+    .loc["1900":]
+    .add(1)
+    .cumprod()
+    .sub(1)
+    .plot(lw=2)
+)
+
+
+
+m = .058
+s = .216
+
+
+sol = minimize_scalar(norm_integral, args=(m, s), bounds=[0.0, 2.0], method="bounded")
+print("Optimal Kelly fraction: {:.4f}".format(sol.x))
+
+
+# This formula can result in Kelly fractions higher than 1. In this case, it is theoretically advantageous to use leverage to purchase additional securities on margin.
+
+
+
+
+
+
+
+##########################################################################################
+##########################################################################################
+##########################################################################################
+
+# Kelly Criterion
+# https://blog.cryptostars.is/simulating-the-implementation-of-the-kelly-criterion-with-python-f52c2d21da2d
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+def kelly_criterion(p, b):
+    return (p * b - (1 - p)) / b
+
+def simulate_betting(initial_bankroll, odds, win_probabilities, bet_count, bet_fraction):
+    bankroll = initial_bankroll
+    bankrolls = [initial_bankroll]
+
+    for _ in range(bet_count):
+        bet_index = np.random.choice(len(win_probabilities))
+        win_probability = win_probabilities[bet_index]
+        bet_size = bet_fraction * bankroll
+        won_bet = np.random.rand() < win_probability
+
+        if won_bet:
+            bankroll += bet_size * (odds[bet_index] - 1)
+        else:
+            bankroll -= bet_size
+
+        bankrolls.append(bankroll)
+
+    return bankrolls
+
+def plot_individual_simulations(simulations, title):
+    for i, bankrolls in enumerate(simulations):
+        plt.plot(bankrolls, label=f'Simulation {i + 1}')
+    plt.xlabel('Match Number')
+    plt.ylabel('Bankroll')
+    plt.title(title)
+    plt.legend()
+    plt.grid()
+    plt.show()
+
+def plot_average_bankrolls(kelly_simulations, fixed_simulations):
+    kelly_average = np.mean(kelly_simulations, axis=0)
+    fixed_average = np.mean(fixed_simulations, axis=0)
+
+    plt.plot(kelly_average, label='Kelly Betting')
+    plt.plot(fixed_average, label='Fixed Bet')
+    plt.xlabel('Match Number')
+    plt.ylabel('Average Bankroll')
+    plt.title('Average Bankroll: Kelly Betting vs Fixed Bet')
+    plt.legend()
+    plt.grid()
+    plt.show()
+
+initial_bankroll = 1000
+odds = [2.2, 3.5, 1.8, 1.5]
+true_win_probabilities = [0.5, 0.3, 0.6, 0.7]
+edge = 0.05
+win_probabilities = [p + edge for p in true_win_probabilities]
+bet_count = 10
+fixed_bet_fraction = 0.1
+
+simulation_count = 10
+kelly_simulations = []
+fixed_simulations = []
+
+for _ in range(simulation_count):
+    kelly_bet_fractions = [kelly_criterion(p, o) for p, o in zip(win_probabilities, odds)]
+    average_kelly_fraction = np.mean(kelly_bet_fractions)
+    kelly_bankrolls = simulate_betting(initial_bankroll, odds, win_probabilities, bet_count, average_kelly_fraction)
+    kelly_simulations.append(kelly_bankrolls)
+
+    fixed_bankrolls = simulate_betting(initial_bankroll, odds, win_probabilities, bet_count, fixed_bet_fraction)
+    fixed_simulations.append(fixed_bankrolls)
+
+plot_individual_simulations(kelly_simulations, 'Kelly Betting Simulations')
+plot_individual_simulations(fixed_simulations, 'Fixed Bet Simulations')
+plot_average_bankrolls(kelly_simulations, fixed_simulations)
+
+
+
+
+
+##########################################################################################
+##########################################################################################
+##########################################################################################
+
+# Kelly Criterion
+# https://python.plainenglish.io/the-kelly-criterion-maximizing-returns-through-optimal-betting-32781a768ffb
+# https://github.com/diegopescoalcalde/kelly-criterion/blob/main/Kelly%20Criterion.ipynb
+
+
+# Import libraries
+import pandas as pd
+import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+import yfinance as yf
+
+np.random.seed(25)
+pd.set_option('display.float_format', lambda x: '%.2f' % x)
+
+
+# Create function of random win-lose bets
+def random_bets(bets, winning_probability):
+    outputs = np.random.choice(a=[-1, 1], p=[1-winning_probability, winning_probability], size=bets)
+    return outputs
+
+
+
+# Create function of cumulative results from bets
+def cumulative_bets(initial_amount, bet_size_list, bets, winning_probability):
+    outputs = random_bets(bets=bets, winning_probability=winning_probability)
+    results_df = pd.DataFrame()
+    
+    for bet_size in bet_size_list:
+
+        amount = initial_amount
+        results = []
+        results.append(amount)
+        
+        for output in outputs:
+            amount = amount + amount*bet_size*output
+            results.append(amount)
+
+        results_df[bet_size] = results
+
+    return outputs, results_df
+
+
+
+# Define parameters
+initial_amount = 1
+bet_size_list = [0.01, 0.02, 0.04, 0.08, 0.15, 0.20]
+bets = 1000
+winning_probability = 0.52
+
+# Run functions and plot results
+outputs, df = cumulative_bets(initial_amount=initial_amount, bet_size_list=bet_size_list, bets=bets, winning_probability=winning_probability)
+df.columns = [f"{int(100*value)}%" for value in bet_size_list]
+
+fig = go.Figure()
+for column in df.columns:
+    fig.add_trace(go.Scatter(x=df.index, y=df[column], name=column))
+fig.update_layout(title='Normalized Cumulative Returns', 
+                    xaxis_title='Bets',
+                height=600,
+                width=950,
+                legend=dict(title='Bet Size',
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1))
+fig.show()
+
+
+
+# Function to calculate the impact of a win followed by a loss
+def calculate_impact(initial_amount, leverage, win, loss):
+    edge = win + loss
+    edge_impact = round(initial_amount*leverage*edge, 2)
+    partial_amount = initial_amount + round(initial_amount*leverage*win, 2)
+    final_amount = round(partial_amount*leverage*(loss) + partial_amount, 2)
+    drag_impact = final_amount - (initial_amount+edge_impact)
+    pnl = round(100*((final_amount/initial_amount) - 1), 2)
+    return [edge_impact, drag_impact, final_amount, pnl]
+
+
+# Define parameters
+initial_amount = 100
+leverage_list = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+win = 0.1
+loss = -0.05
+edge_impact_list = []
+drag_impact_list = []
+final_amount_list = []
+pnl_list = []
+
+# Loop through different values of leverage and calculate impacts
+for leverage in leverage_list:
+
+    results = calculate_impact(initial_amount, leverage, win, loss)
+    edge_impact_list.append(results[0])
+    drag_impact_list.append(results[1])
+    final_amount_list.append(results[2])
+    pnl_list.append(results[3])
+
+final_df = {'Leverage':leverage_list,
+            'Edge Impact':edge_impact_list,
+            'Drag Impact':drag_impact_list,
+            'Final Amount':final_amount_list,
+            'PnL':pnl_list}
+
+final_df = pd.DataFrame(final_df)
+final_df['Profit'] = final_df['Final Amount'] - initial_amount
+final_df
+
+# Plot results
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=final_df['Leverage'], y=final_df['Edge Impact'], name='Edge Impact'))
+fig.add_trace(go.Scatter(x=final_df['Leverage'], y=final_df['Drag Impact'], name='Drag Impact'))
+fig.add_trace(go.Scatter(x=final_df['Leverage'], y=final_df['Profit'], name='Profit'))
+fig.update_layout(title='Edge Impact x Drag Impact',
+                    xaxis_title='Leverage (x Initial Amount)',
+                    yaxis_title='$',
+                height=600,
+                width=950,
+                legend=dict(title='Legend',
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1))
+fig.show()
+
+
+
+
+# Define parameters
+initial_amount = 1
+bet_size_list = [0.04]
+bets = 1000
+iterations = 100
+winning_probability = 0.52
+monte_carlo_df = pd.DataFrame()
+
+# Run Monte Carlo simulation to see distribution of returns
+for i in range(iterations):
+
+    outputs, df = cumulative_bets(initial_amount=initial_amount, bet_size_list=bet_size_list, bets=bets, winning_probability=winning_probability)
+    monte_carlo_df = pd.concat([monte_carlo_df, df], axis=1)
+monte_carlo_df.columns = [f"{value}" for value in range(iterations)]
+
+# Plot results
+fig = go.Figure()
+for column in monte_carlo_df.columns:
+    fig.add_trace(go.Scatter(x=monte_carlo_df.index, y=monte_carlo_df[column], name=column))
+fig.update_yaxes(type="log")
+fig.update_layout(title='Normalized Cumulative Returns', 
+                    xaxis_title='Bets',
+                height=600,
+                width=950,
+                showlegend=False)
+fig.show()
+
+
+
+
+# Plot histogram of results
+final_return = pd.DataFrame(monte_carlo_df.iloc[-1].transpose())
+final_return.columns = ['Return']
+fig = px.histogram(final_return,
+            x=final_return['Return'],
+            nbins=100)
+fig.show()
+
+
+# Backtest Adapted Kelly Criterion in Financial Market
+
+# Define parameters
+tickers = ['^GSPC']
+rfr = 0
+
+# Download asset data, calculate mean return, variance and kelly
+asset = pd.DataFrame(yf.download(tickers, start='2015-01-01', end='2022-12-31')['Close'])
+asset['Daily Return'] = asset.pct_change()
+mean_return = asset['Daily Return'].mean()
+variance = (asset['Daily Return'].std())**2
+kelly = (mean_return - rfr)/variance
+
+print('Mean Return:', round(mean_return, 5))
+print('Variance:', round(variance, 5))
+print('Risk Free Rate:', rfr)
+print('Kelly:', round(kelly, 5))
+
+# Perform buy-and-hold vectorized backtest
+asset['Benchmark'] = (1+asset['Daily Return']).cumprod()
+asset['Benchmark'].fillna(1, inplace=True)
+asset['Full Kelly'] = (1+(kelly*asset['Daily Return'])).cumprod()
+asset['Half Kelly'] = (1+(0.5*kelly*asset['Daily Return'])).cumprod()
+asset['1.5x Kelly'] = (1+(1.5*kelly*asset['Daily Return'])).cumprod()
+asset['2x Kelly'] = (1+(2*kelly*asset['Daily Return'])).cumprod()
+
+# Plot results
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=asset.index, y=asset['Benchmark'], name='Benchmark'))
+fig.add_trace(go.Scatter(x=asset.index, y=asset['Full Kelly'], name='Full Kelly'))
+fig.add_trace(go.Scatter(x=asset.index, y=asset['Half Kelly'], name='Half Kelly'))
+fig.add_trace(go.Scatter(x=asset.index, y=asset['1.5x Kelly'], name='1.5x Kelly'))
+fig.update_layout(title='Kelly Criterion in S&P500 - Backtest',
+                    xaxis_title='Date',
+                    yaxis_title='Normalized Cumulative Return',
+                height=600,
+                width=950,
+                legend=dict(title='Legend',
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1))
+fig.show()
+
+
+
+# Define Parameters
+tickers = ['^GSPC']
+rfr = 0
+asset = pd.DataFrame(yf.download(tickers, start='2015-01-01', end='2022-12-31')['Close'])
+asset['Daily Return'] = asset.pct_change()
+year_list = [2016, 2017, 2018, 2019, 2020, 2021, 2022]
+kelly_list = []
+cap_kelly_list = []
+results_df = pd.DataFrame(columns=['Benchmark', 'Full Kelly', 'Half Kelly', '1.5x Kelly'])
+partial_amount = [1, 1, 1, 1]
+
+# Loop through years
+for year in year_list:
+
+    # Split in and out of sample
+    last_year_data = asset[asset.index.year == (year-1)].copy()
+    this_year_data = asset[asset.index.year == (year)].copy()
+
+    # Calculate kelly using in-sample data
+    mean_return = last_year_data['Daily Return'].mean()
+    variance = (last_year_data['Daily Return'].std())**2
+    formula_kelly = (mean_return - rfr)/variance
+    kelly = np.clip(formula_kelly, 0.5, 3)
+    kelly_list.append(formula_kelly)
+    cap_kelly_list.append(kelly)
+
+    # Vectorized backtest using out of sample data
+    this_year_data['Benchmark'] = partial_amount[0]*(1+this_year_data['Daily Return']).cumprod()
+    this_year_data['Full Kelly'] = partial_amount[1]*(1+(kelly*this_year_data['Daily Return'])).cumprod()
+    this_year_data['Half Kelly'] = partial_amount[2]*(1+(0.5*kelly*this_year_data['Daily Return'])).cumprod()
+    this_year_data['1.5x Kelly'] = partial_amount[3]*(1+(1.5*kelly*this_year_data['Daily Return'])).cumprod()
+    results_df = pd.concat([results_df, this_year_data])
+
+    partial_amount = [results_df['Benchmark'].iloc[-1], results_df['Full Kelly'].iloc[-1], results_df['Half Kelly'].iloc[-1], results_df['1.5x Kelly'].iloc[-1]]
+
+# Plot Kelly values
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=year_list, y=kelly_list, name='Kelly'))
+fig.add_trace(go.Scatter(x=year_list, y=cap_kelly_list, name='Limited Kelly'))
+fig.update_layout(title='Kelly Criterion in S&P500',
+                    xaxis_title='Date',
+                    yaxis_title='Kelly Leverage',
+                height=600,
+                width=950,
+                legend=dict(title='Legend',
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1))
+fig.show()
+
+
+# Plot test returns
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=results_df.index, y=results_df['Benchmark'], name='Benchmark'))
+fig.add_trace(go.Scatter(x=results_df.index, y=results_df['Full Kelly'], name='Full Kelly'))
+fig.add_trace(go.Scatter(x=results_df.index, y=results_df['Half Kelly'], name='Half Kelly'))
+fig.add_trace(go.Scatter(x=results_df.index, y=results_df['1.5x Kelly'], name='1.5x Kelly'))
+fig.update_layout(title='Kelly Criterion in S&P500 - Walk-Forward Test',
+                    xaxis_title='Date',
+                    yaxis_title='Normalized Cumulative Return',
+                height=600,
+                width=950,
+                legend=dict(title='Legend',
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1))
+fig.show()
+
+
+
+
+
+
+
+
+
+
+
+# https://github.com/shashankvemuri/Finance/blob/master/stock_analysis/kelly_criterion.py
+
+import numpy as np
+import pandas as pd
+import yfinance as yf
+import datetime as dt
+
+# Define stock symbol and time frame for analysis
+symbol = 'BAC'
+num_of_years = 1
+start_date = dt.date.today() - dt.timedelta(days=365 * num_of_years)
+end_date = dt.date.today()
+
+# Download stock data using yfinance package
+stock_data = yf.download(symbol, start=start_date, end=end_date)
+
+# Calculate daily returns and drop rows with missing data
+stock_data['Returns'] = stock_data['Adj Close'].pct_change()
+stock_data.dropna(inplace=True)
+
+# Display the first few rows of the data for verification
+print(stock_data.head())
+
+# Calculate Kelly Criterion
+# Extract positive (wins) and negative (losses) returns
+wins = stock_data['Returns'][stock_data['Returns'] > 0]
+losses = stock_data['Returns'][stock_data['Returns'] <= 0]
+
+# Calculate win ratio and win-loss ratio
+win_ratio = len(wins) / len(stock_data['Returns'])
+win_loss_ratio = np.mean(wins) / np.abs(np.mean(losses))
+
+# Apply Kelly Criterion formula
+kelly_criterion = win_ratio - ((1 - win_ratio) / win_loss_ratio)
+
+# Print the Kelly Criterion percentage
+print('Kelly Criterion: {:.3f}%'.format(kelly_criterion * 100))

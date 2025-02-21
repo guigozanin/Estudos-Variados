@@ -1,0 +1,148 @@
+
+###############
+############### Retorno ativos do Ibovespa ###############
+###############
+
+
+# Base de ativos aqui, peço pro gpt resumir
+# https://www.b3.com.br/pt_br/market-data-e-indices/indices/indices-amplos/indice-ibovespa-ibovespa-composicao-da-carteira.htm
+
+# Lista de tickers extraída da imagem (separei cada um por ", ")
+tickers = [
+    "ALOS3.SA", "ALPA4.SA", "ABEV3.SA", "ASAI3.SA", "AURE3.SA", "AZUL4.SA", "AZZA3.SA", 
+    "B3SA3.SA", "BBSE3.SA", "BBDC3.SA", "BBDC4.SA", "BRAP4.SA", "BBAS3.SA", "BRKM5.SA", 
+    "BRAV3.SA", "BRFS3.SA", "BPAC11.SA", "CXSE3.SA", "CRFB3.SA", "CCRO3.SA", "CMIG4.SA", 
+    "COGN3.SA", "CPLE6.SA", "CSAN3.SA", "CPFE3.SA", "CMIN3.SA", "CVCB3.SA", "CYRE3.SA", 
+    "ELET3.SA", "ELET6.SA", "EMBR3.SA", "ENGI11.SA", "ENEV3.SA", "EGIE3.SA", "EQTL3.SA", 
+    "EZTC3.SA", "FLRY3.SA", "GGBR4.SA", "GOAU4.SA", "NTCO3.SA", "HAPV3.SA", "HYPE3.SA", 
+    "IGTI11.SA", "IRBR3.SA", "ITSA4.SA", "ITUB4.SA", "JBSS3.SA", "KLBN11.SA", "RENT3.SA", 
+    "LREN3.SA", "LWSA3.SA", "MGLU3.SA", "MRFG3.SA", "BEEF3.SA", "MRVE3.SA", "MULT3.SA", 
+    "PCAR3.SA", "PETR3.SA", "PETR4.SA", "RECV3.SA", "PRIO3.SA", "PETZ3.SA", "RADL3.SA", 
+    "RAIZ4.SA", "RDOR3.SA", "RAIL3.SA", "SBSP3.SA", "SANB11.SA", "STBP3.SA", "SMTO3.SA", 
+    "CSNA3.SA", "SLCE3.SA", "SUZB3.SA", "TAEE11.SA", "VIVT3.SA", "TIMS3.SA", "TOTS3.SA", 
+    "TRPL4.SA", "UGPA3.SA", "USIM5.SA", "VALE3.SA", "VAMO3.SA", "VBBR3.SA", "VIVA3.SA", 
+    "WEGE3.SA", "YDUQ3.SA", "^BVSP"
+]
+
+# Configurações de datas
+start_date = "2017-01-01"
+
+
+# Baixando o histórico de cada ação e armazenando em um DataFrame
+all_data = {}
+for ticker in tickers:
+    print(f"Baixando dados para {ticker}...")
+    try:
+        stock = yf.Ticker(ticker)
+        df = stock.history(start=start_date, auto_adjust = False)
+        all_data[ticker] = df['Adj Close']  # Apenas o preço de fechamento
+    except Exception as e:
+        print(f"Erro ao baixar dados para {ticker}: {e}")
+
+# Converte o dicionário para um DataFrame
+data_df = pd.DataFrame(all_data)
+data_df.columns.values[-1] = "IBOV"
+data_df.sort_values('Date', inplace=True)
+
+
+Arrumando a base de ativos que entraram depois:
+
+# Certifique-se de que o índice do DataFrame é timezone-naive
+data_df.index = pd.to_datetime(data_df.index).tz_localize(None)
+
+# Converta a data de comparação para timezone-naive
+date_to_compare = pd.to_datetime("2020-08-09").tz_localize(None)
+
+# Filtre o DataFrame
+data_df["PRIO3.SA"] = data_df["PRIO3.SA"][data_df.index >= date_to_compare]
+
+# Converta a data de comparação para timezone-naive
+date_to_compare2 = pd.to_datetime("2020-01-03").tz_localize(None)
+
+# Filtre o DataFrame
+data_df["BPAC11.SA"] = data_df["BPAC11.SA"][data_df.index >= date_to_compare2]
+
+# Converta a data de comparação para timezone-naive
+date_to_compare3 = pd.to_datetime("2018-01-03").tz_localize(None)
+
+# Filtre o DataFrame
+data_df["MGLU3.SA"] = data_df["MGLU3.SA"][data_df.index >= date_to_compare3]
+
+
+# Converta a data de comparação para timezone-naive
+date_to_compare3 = pd.to_datetime("2022-04-01").tz_localize(None)
+
+# Filtre o DataFrame
+data_df["SLCE3.SA"] = data_df["SLCE3.SA"][data_df.index >= date_to_compare3]
+
+data_df
+historical_data1 = data_df.copy()
+
+
+
+# Retornos no ano
+
+
+# Criar um novo DataFrame com a variação percentual de cada ativo
+returns = historical_data1.pct_change()
+datas_returns = returns.index
+
+# Criar outro DataFrame com a acumulação dos retornos
+cumulative_returns = returns.apply(lambda x: (1 + x).cumprod() - 1).reset_index(drop=True)
+cumulative_returns.index = datas_returns
+
+cumulative_returns1 = cumulative_returns.copy()
+cumulative_returns1 = cumulative_returns1.iloc[1:]
+cumulative_returns1.reset_index(inplace=True)
+
+
+# Usar melt para transformar o DataFrame
+melted_df = cumulative_returns1.melt(id_vars=['Date'], var_name='Ticker', value_name='Return')
+
+
+# Assuming the other columns are placeholders for now
+melted_df.rename(columns={'Date': 'ref_date'}, inplace=True)
+
+# Definir cores personalizadas
+custom_colors = {"IBOV": "red", "PETR4.SA": "green", "BBAS3.SA": "gold", "CMIG4.SA": "blue", "Others": "silver"}
+
+
+# Sorting the melted_df by the 'Return' column in descending order
+#sorted_df = melted_df.sort_values('Return', ascending=False)
+
+
+# Criar a figura e o eixo
+fig, ax = plt.subplots()
+
+# Para cada ticker único no DataFrame, desenhar uma linha
+lines = []  # Lista para guardar as linhas
+labels = []  # Lista para guardar os rótulos
+for ticker in melted_df['Ticker'].unique():
+    df = melted_df[melted_df['Ticker'] == ticker]
+    if ticker in ["IBOV", "PETR4.SA", "BBAS3.SA", "CMIG4.SA"]:
+        line, = ax.plot(df['ref_date'], df['Return'], color=custom_colors.get(ticker, "blue"), linewidth=2.5)
+        lines.append(line)
+        labels.append(ticker)
+    else:
+        ax.plot(df['ref_date'], df['Return'], color="silver", alpha=0.2)
+
+# Adicionar a legenda
+plt.legend(lines, labels, loc='upper left', prop={'size': 8})
+
+
+# Adicionar rótulos interativos
+crs = mplcursors.cursor(ax, hover=True)
+crs.connect("add", lambda sel: sel.annotation.set_text(melted_df['Ticker'][sel.target.index]))
+
+# Configurar o tema e os rótulos
+plt.xlabel('Período')
+plt.ylabel('Retorno Acumulado')
+plt.title('Elaboração @Gui_Zanin - Base de dados: Yahoo Finance', fontsize=10)
+plt.suptitle('Ações do Ibovespa desde 2017', fontsize=18)
+plt.gca().set_yticklabels(['{:.0f}%'.format(x * 100) for x in plt.gca().get_yticks()])
+
+# Adicionar legenda na direita superior
+#plt.savefig('graficos/grafico_retornos_ativos_ibov.png')
+plt.xticks(rotation=45)
+#plt.tight_layout()
+plt.show()

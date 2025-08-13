@@ -1,0 +1,90 @@
+
+
+# Pegando Noticias do Google News
+# https://www.aprendadatascience.com/blog/exemplo-de-googlenews-com-python
+
+
+# Uma noticia
+from GoogleNews import GoogleNews
+import pandas as pd
+
+googlenews = GoogleNews(period='d')
+# googlenews=GoogleNews(start='08/01/2020',end='08/31/2020') # periodo
+googlenews.setlang('pt')
+googlenews.search("petrobras")
+results = googlenews.result()
+results_df = pd.DataFrame(results)
+results_df
+
+
+
+# Várias noticias
+# Loop
+
+Buscas = ["Petrobras", "Vale"]
+
+googlenews = GoogleNews(period='d')
+# googlenews=GoogleNews(start='08/01/2020',end='08/31/2020') # periodo
+googlenews.setlang('pt')
+
+all_results = []
+
+for palavra in Buscas:
+    googlenews.search(palavra)
+    todos_resultados = googlenews.result()
+    all_results.extend(todos_resultados)
+
+all_results_df = pd.DataFrame(all_results)
+
+all_results_df
+
+len(all_results_df) #Quantidade de noticias
+
+all_results_df["media"].unique() # Fontes
+
+len(all_results_df["media"].unique()) # número de jornais
+
+
+
+#Se quiser usar para AI, precisa converter para Markdown
+
+
+# Markdown
+# Create a variable containing the DataFrame in Markdown format
+markdown_results = all_results_df.to_markdown(index=False)
+
+# Now markdown_results is a string in Markdown format
+print(markdown_results)
+
+
+# IA Gemini
+
+
+"""
+Install the Google AI Python SDK
+
+$ pip install google-genai
+
+See the getting started guide for more information:
+https://ai.google.dev/gemini-api/docs/get-started/python
+
+And API
+https://aistudio.google.com/apikey
+"""
+
+
+
+# Ask Gemini to summarize the table
+prompt = f"Faça um resumo, em português, das noticias, em bullet points e coloque os links das materias:\n\n{markdown_results}"
+
+# Send to model
+response = client.models.generate_content(
+    model="gemini-2.5-flash",
+    contents=prompt
+)
+
+# Print the AI summary
+print(response.text)
+
+
+
